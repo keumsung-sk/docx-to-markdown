@@ -27,16 +27,44 @@ FIXED_DATE = "2001-01-01"
 DEFAULT_PHONE_NUMBER = "555-555-5555"
 START_MARKER = "Footer (All Pages)"
 
-st.set_page_config(page_title="Jekyll Parser (No API)", layout="wide")
-st.title("📄 Docx to Jekyll Parser (Upload Only)")
-st.markdown("""
-- **Upload Only:** No Google API setup required.
-- **Features:** Service Box, Reviews, Folder Structure (`_posts`, `img`).
-- **Images:** Downloads public web images only.
-""")
+st.set_page_config(page_title="Jekyll Parser (Upload Only)", layout="wide")
 
 # ==========================================
-# 2. Utility Functions
+# 2. UI Layout (Sidebar & Main)
+# ==========================================
+
+# --- Sidebar: Features & Instructions ---
+with st.sidebar:
+    st.header("📝 Docx to Jekyll Parser")
+    st.markdown("""
+    ### ✨ Key Features
+    
+    1. **📄 Seamless Markdown Conversion**
+       - Converts uploaded `.docx` pages directly into clean Markdown (`.md`) format.
+    
+    2. **🖼️ Smart Image Extraction**
+       - Automatically detects public image URLs within the document.
+       - Allows users to extract and download the actual image files.
+    
+    3. **🧩 Modular Component Separation**
+       - Identifies **Reviews** and **Navigation** sections.
+       - Exports them into separate YAML/Markdown files.
+    
+    4. **👀 Instant Preview**
+       - Preview the converted content on the right side.
+    
+    5. **📦 One-Click Bulk Download**
+       - Download Main content, Review/Nav modules, and Images in a single ZIP package.
+    """)
+    st.info("💡 **Note:** Drag & Drop your file on the right to start.")
+
+# --- Main Area: Title & Upload ---
+st.title("📂 Document Converter (Upload & Preview)")
+
+target_file = st.file_uploader("Drag and drop your Word (.docx) file here", type=["docx"])
+
+# ==========================================
+# 3. Utility Functions (Kept as provided)
 # ==========================================
 
 def clean_markdown_link(text):
@@ -68,11 +96,10 @@ def should_skip_page(title, content):
     return False
 
 # ==========================================
-# 3. Image Processing Functions (Web Only)
+# 4. Image Processing Functions
 # ==========================================
 
 def download_and_convert_image(url):
-    # Clean URL
     clean_match = re.search(r'(https?://[^\s<>")\]]+)', url)
     if clean_match:
         url = clean_match.group(1)
@@ -82,13 +109,11 @@ def download_and_convert_image(url):
     if "youtube.com" in url or "youtu.be" in url:
         return f"Skipped (Video Link)"
 
-    # Simple Drive Link Converter (Only works for PUBLIC links)
     if 'drive.google.com' in url and '/view' in url:
         file_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
         if file_id_match:
             url = f"https://drive.google.com/uc?export=download&id={file_id_match.group(1)}"
 
-    # Anti-Block Headers
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36'
@@ -117,7 +142,7 @@ def download_and_convert_image(url):
     return "Failed (Unknown)"
 
 # ==========================================
-# 4. Hyperlink Extractor
+# 5. Hyperlink Extractor
 # ==========================================
 
 def extract_hyperlinks_from_docx(file_obj):
@@ -158,7 +183,7 @@ def extract_hyperlinks_from_docx(file_obj):
     return hyperlinks_map
 
 # ==========================================
-# 5. Extractors & Parsers
+# 6. Extractors & Parsers
 # ==========================================
 
 def extract_nav_items_from_lines(lines):
@@ -429,10 +454,6 @@ hide_sidebar_financing: true
 """
     return final_content + '\n'.join(data['body_lines']), service_box
 
-# ==========================================
-# 9. Main Process & UI
-# ==========================================
-
 def process_docx(file_obj):
     hyperlink_map = extract_hyperlinks_from_docx(file_obj)
     result = mammoth.convert_to_html(file_obj)
@@ -460,7 +481,6 @@ def process_docx(file_obj):
                 sections['Navigation'] = nav_lines
             else: nav_lines.append(stripped)
 
-    # Backup Nav List
     target_pages = set()
     if 'Navigation' in sections:
         raw_nav_items = extract_nav_items_from_lines(sections['Navigation'])
@@ -495,35 +515,42 @@ def process_docx(file_obj):
     if current_content and current_page != "00_Ignore": sections[current_page] = "\n".join(current_content)
     return sections, hyperlink_map
 
-# --- UI ---
-target_file = st.file_uploader("Upload DOCX File", type=["docx"])
+# ==========================================
+# 7. Main Logic & Display
+# ==========================================
 
 if target_file:
     with st.spinner('Parsing Document...'):
+        # 1. Parse File
         raw_sections, hyperlink_map = process_docx(target_file)
         
-        if 'Navigation' in raw_sections:
-            nav_yaml = generate_nav_yaml(raw_sections['Navigation'])
-            st.success("✅ Navigation Detected")
-            with st.expander("full.yml"): st.code(nav_yaml, language='yaml')
-            st.divider()
-
         zip_buffer = io.BytesIO()
         valid_cnt = 0
         reviews_yaml = None
         services_yaml_content = None 
+        nav_yaml = None
         image_queue = [] 
-        
+        preview_data = {} # For displaying in tabs
+
+        # 2. Generate ZIP Content
         with zipfile.ZipFile(zip_buffer, "w") as zf:
-            st.subheader("📝 Pages & Images")
+            # A. Navigation
+            if 'Navigation' in raw_sections:
+                nav_yaml = generate_nav_yaml(raw_sections['Navigation'])
+                preview_data['Navigation'] = nav_yaml
+            
+            # B. Pages & Reviews
             for page_name, content in raw_sections.items():
                 if page_name == 'Navigation' or page_name == '00_Ignore': continue 
                 if should_skip_page(page_name, content): continue
+                
+                # Review Section
                 if "customer reviews" in page_name.lower():
                     reviews_yaml = generate_reviews_yaml(content)
                     zf.writestr("_data/reviews.yml", reviews_yaml)
                     continue
 
+                # Standard Pages
                 final_md, service_box_data = parse_page_content(content, page_name, image_queue, hyperlink_map)
                 
                 if service_box_data:
@@ -533,37 +560,84 @@ if target_file:
                 slug = to_kebab_case(page_name.lower().replace(" page", "").strip())
                 fname = f"{FIXED_DATE}-{slug}.md"
                 zf.writestr(f"_posts/{fname}", final_md)
+                
+                # Add to Preview Data
+                preview_data[fname] = final_md
                 valid_cnt += 1
-                with st.expander(f"✅ {fname}"): st.code(final_md, language='yaml')
 
+            # C. Images (This takes time, show progress)
+            image_log = []
             if image_queue:
-                st.info(f"🖼 Found {len(image_queue)} images. Smart Processing...")
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                failed_images = []
+                progress_text = "🖼 Extracting Images..."
+                my_bar = st.progress(0, text=progress_text)
                 
                 for i, img_data in enumerate(image_queue):
                     url, fname = img_data['url'], img_data['filename']
-                    status_text.text(f"⏳ Processing {i+1}/{len(image_queue)}: {fname}...")
                     res = download_and_convert_image(url)
-                    if isinstance(res, bytes): zf.writestr(f"img/{fname}.webp", res)
-                    else: failed_images.append(f"{fname} -> {res}")
-                    progress_bar.progress((i + 1) / len(image_queue))
+                    if isinstance(res, bytes): 
+                        zf.writestr(f"img/{fname}.webp", res)
+                        image_log.append(f"✅ {fname}.webp")
+                    else: 
+                        image_log.append(f"❌ {fname} -> {res}")
+                    my_bar.progress((i + 1) / len(image_queue), text=f"Processing {fname}...")
                 
-                status_text.text("✅ Done!")
-                if failed_images:
-                    st.warning("⚠️ Skipped/Failed items:")
-                    for f in failed_images: st.write(f"- {f}")
-                else: st.success("✅ All images processed!")
+                my_bar.empty()
 
-        if reviews_yaml: 
-            st.success("⭐ Reviews Extracted!")
-            with st.expander("🔍 Preview reviews.yml"): st.code(reviews_yaml, language='yaml')
+        zip_buffer.seek(0)
         
-        if services_yaml_content:
-            st.success("⭐ Services Extracted!")
-            with st.expander("🔍 Preview services.yml"): st.code(services_yaml_content, language='yaml')
+        # 3. Display Results (Preview Area)
+        st.success("✅ Conversion Complete!")
 
-        if valid_cnt > 0 or reviews_yaml:
-            st.divider()
-            st.download_button("Download ZIP", zip_buffer.getvalue(), "converted_pages.zip", "application/zip")
+        # Tabs for better organization
+        tab_list = ["📄 Converted Pages", "📂 Data Files"]
+        if image_log: tab_list.append("🖼 Image Log")
+        
+        tabs = st.tabs(tab_list)
+
+        # Tab 1: Converted Markdown Pages
+        with tabs[0]:
+            if preview_data:
+                for fname, content in preview_data.items():
+                    if fname == "Navigation": continue
+                    with st.expander(f"📝 {fname}"):
+                        st.code(content, language='yaml')
+            else:
+                st.info("No standard pages found.")
+
+        # Tab 2: Data Files (Nav, Reviews, Services)
+        with tabs[1]:
+            col1, col2 = st.columns(2)
+            with col1:
+                if nav_yaml:
+                    with st.expander("🧭 Navigation (full.yml)", expanded=True):
+                        st.code(nav_yaml, language='yaml')
+                else: st.warning("No Navigation detected.")
+            
+            with col2:
+                if reviews_yaml:
+                    with st.expander("⭐ Reviews (_data/reviews.yml)", expanded=True):
+                        st.code(reviews_yaml, language='yaml')
+                if services_yaml_content:
+                    with st.expander("🛠 Services (_data/services.yml)", expanded=True):
+                        st.code(services_yaml_content, language='yaml')
+
+        # Tab 3: Image Log (if exists)
+        if image_log:
+            with tabs[2]:
+                st.write(f"Processed {len(image_queue)} images.")
+                st.text("\n".join(image_log))
+
+        # 4. Download Button (At the bottom, pre-loaded with zip_buffer)
+        st.divider()
+        st.download_button(
+            label="📦 Download All Files (ZIP)",
+            data=zip_buffer,
+            file_name="converted_files.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+
+else:
+    # Empty State Area (Right Side)
+    st.write("👈 Please refer to the instructions on the sidebar and upload a file to start.")
+    for _ in range(5): st.write("") # Spacer
