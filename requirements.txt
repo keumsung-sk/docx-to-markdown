@@ -1,0 +1,7 @@
+streamlit
+mammoth
+markdownify
+PyYAML
+Pillow
+python-docx
+requests
